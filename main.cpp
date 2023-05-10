@@ -40,7 +40,7 @@ namespace anti_cheat {
 			return;
 		}
 
-		Utils::Write<uint32_t>(srbase + 0xFCDC0, 0xCCC3C031);
+		Utils::Write<uint64_t>(srbase + 0xFCDC0, 0xCCCCC300000000B8ull);
 		Utils::Write<uint8_t>(srbase + 0xF9940, 0xC3);
 		Utils::Write<uint16_t>(srbase + 0x1BCBA0, 0xFEEB);
 	}

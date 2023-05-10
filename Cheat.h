@@ -88,20 +88,31 @@ namespace Cheat
 				v_hooks.push_back({ "setautobattleflag", 0x5130040,&h_setautobattleflag,&o_setautobattleflag });
 			}
 
-			static auto CreateHook = [](LPVOID pTarget, LPVOID pDetour, LPVOID* ppOriginal)->bool
-			{
-				return MH_CreateHook(pTarget, pDetour, ppOriginal) == MH_OK && MH_EnableHook(pTarget) == MH_OK;
-			};
-
 			uint64_t game_assembly = 0;
+			for (BOOL dll_loaded = false; !dll_loaded; Sleep(50)) {
+				dll_loaded = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN, TEXT("gameassembly.dll"), reinterpret_cast<HMODULE*>(&game_assembly));
+			}
 
-			while (!game_assembly)
-				game_assembly = reinterpret_cast<uint64_t>(GetModuleHandleA("gameassembly.dll"));
-
+			printf("[>] Creating hooks\n");
+			bool created_all_hooks = true;
 			for (auto& hook : v_hooks) {
-				if (!CreateHook(reinterpret_cast<void**>(game_assembly + hook.rva), hook.hook, reinterpret_cast<void**>(hook.original))) {
-					printf("[-] Failed to create/enable hook for %s\n", hook.name.c_str());
+				MH_STATUS status_code = MH_OK;
+				LPVOID target = reinterpret_cast<LPVOID*>(game_assembly + hook.rva);
+				MH_CreateHook(target, hook.hook, reinterpret_cast<LPVOID*>(hook.original));
+				if (status_code != MH_OK) {
+					printf("[-] Could not create hook for %s\n", hook.name.c_str());
+					created_all_hooks = false;
+					continue;
 				}
+
+				status_code = MH_EnableHook(target);
+				if (status_code != MH_OK) {
+					printf("[-] Could not enable the hook for %s\n", hook.name.c_str());
+					created_all_hooks = false;
+				}
+			}
+			if (created_all_hooks) {
+				printf("[+] Created all hooks successfully\n");
 			}
 		}
 	}
@@ -143,6 +154,12 @@ namespace Cheat
 		if (ImGui::BeginTabItem("Battle"))
 		{
 			ImGui::Checkbox("Speed Modifier", &GlobalSetting::battle::speed_hack);
+
+			ImGui::Checkbox("Infinite Action points", &GlobalSetting::battle::action_points);
+
+			ImGui::Checkbox("God Mode", &GlobalSetting::battle::god_mode);
+
+			ImGui::Checkbox("One Hit Kill", &GlobalSetting::battle::one_hit_kill);
 
 			if (GlobalSetting::battle::speed_hack) {
 
@@ -276,12 +293,34 @@ namespace Cheat
 	inline void UpdateSpeed(const float speed, uint64_t game_assembly, uint64_t unity_player, const bool is_battle) {
 
 		if (is_battle) {
-			Utils::Write<float>(Utils::Read<__int64>(Utils::Read<__int64>(game_assembly + 0x8CAA6A0) + 0xC0) + 0x1DC, speed);
-			Utils::Write<float>(Utils::Read<__int64>(unity_player + 0x1D21D78) + 0xFC, 1.f);
+			Utils::Write<float>(Utils::Read(game_assembly, 0x8CAA6A0, 0xC0, 0x1DC), speed);
+			Utils::Write<float>(Utils::Read(unity_player, 0x1D21D78, 0xFC), 1.f);
 		}
 		else {
-			Utils::Write<float>(Utils::Read<__int64>(Utils::Read<__int64>(game_assembly + 0x8CAA6A0) + 0xC0) + 0x1DC, 1.f);
-			Utils::Write<float>(Utils::Read<__int64>(unity_player + 0x1D21D78) + 0xFC, speed);
+			Utils::Write<float>(Utils::Read(game_assembly, 0x8CAA6A0, 0xC0, 0x1DC), 1.f);
+			Utils::Write<float>(Utils::Read(unity_player, 0x1D21D78, 0xFC), speed);
+		}
+	}
+
+	inline void GodMode(uint64_t game_assembly) {
+		if (GlobalSetting::battle::god_mode) {
+			const auto address = Utils::Read(game_assembly, 0x086D4C40, 0xE70, 0x60, 0x370, 0x50, 0x110, 0x28, 0x54);
+			Utils::Write<uint32_t>(address, 1'000'000'000u);
+		}
+	}
+
+	inline void InfiniteActionPoints(uint64_t game_assembly) {
+		if (GlobalSetting::battle::action_points) {
+			const auto address = Utils::Read(game_assembly, 0x086D4C40, 0xE70, 0x60, 0x370, 0x80, 0x14);
+			Utils::Write<uint32_t>(address, 4u);
+		}
+	}
+
+	inline void OneHitKill(uint64_t game_assembly)
+	{
+		if (GlobalSetting::battle::one_hit_kill) {
+			const auto address = Utils::Read(game_assembly, 0x086D4C40, 0xE70, 0x60, 0x370, 0x50, 0x110, 0x28, 0x54);
+			Utils::Write<uint32_t>(address, 1u);
 		}
 	}
 
@@ -309,6 +348,10 @@ namespace Cheat
 
 		UpdateSpeed(GlobalSetting::battle::speed_hack ? GlobalSetting::battle::battle_speed : 1.f, game_assembly, unity_player, true);
 
+		InfiniteActionPoints(game_assembly);
+
+		OneHitKill(game_assembly);
+
 		Utils::Write<uint32_t>(game_assembly + 0x5DA5F20, GlobalSetting::battle::auto_battle_unlock ? 0x90C3C031 : 0x83485340);
 	}
 
@@ -324,11 +367,12 @@ namespace Cheat
 	}
 
 	inline void Main() {
-		uint64_t game_assembly = 0, unity_player = 0;
-
-		while (!game_assembly && !unity_player) {
-			game_assembly = reinterpret_cast<uint64_t>(GetModuleHandleA("gameassembly.dll"));
-			unity_player = reinterpret_cast<uint64_t>(GetModuleHandleA("unityplayer.dll"));
+		uint64_t game_assembly = 0;
+		uint64_t unity_player = 0;
+		
+		for (BOOL dll_loaded = false; !dll_loaded; dll_loaded = true, Sleep(50)) {
+			dll_loaded &= GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN, TEXT("gameassembly.dll"), reinterpret_cast<HMODULE*>(&game_assembly));
+			dll_loaded &= GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_PIN, TEXT("unityplayer.dll"), reinterpret_cast<HMODULE*>(&unity_player));
 		}
 
 		CreateThread(0, 0, (LPTHREAD_START_ROUTINE)Dialogue, 0, 0, 0);

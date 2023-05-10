@@ -27,6 +27,9 @@ namespace GlobalSetting
 
 		inline bool auto_battle_unlock = false;
 		bool force_battle = false;
+		bool action_points = false;
+		bool god_mode = false;
+		bool one_hit_kill = false;
 	}
 
 	namespace other 
